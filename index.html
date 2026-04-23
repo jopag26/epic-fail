@@ -54,7 +54,7 @@ const MAX_ENEMIES = 7;
 const MAX_TOTAL_ENEMIES = 30;
 
 // ─── STATE ──────────────────────────────────────────────────────────────
-let state, player, bullets, enemies, particles, spawnTimer, frameNum;
+let state, player, bullets, bossBullets, enemies, particles, spawnTimer, frameNum;
 
 // ─── PLATFORMS ──────────────────────────────────────────────────────────
 const platforms = [
@@ -79,11 +79,12 @@ const treeDefs = [
 
 // ─── INIT ───────────────────────────────────────────────────────────────
 function restart() {
-  state    = { over: false, won: false, score: 0, killed: 0, totalSpawned: 0 };
+  state    = { over: false, won: false, score: 0, killed: 0, totalSpawned: 0, boss: null };
   player   = { x: 80, y: 400, w: 32, h: 42, vx: 0, vy: 0,
                onGround: false, facing: 1, cooldown: 0, hp: 10,
                iframes: 0, jumpPressed: false, jumpsLeft: 2, maxHp: 10 };
-  bullets  = [];
+  bullets     = [];
+  bossBullets = [];
   enemies  = [];
   particles= [];
   spawnTimer = 120;
@@ -102,6 +103,19 @@ function spawnEnemy() {
     vy: 0, onGround: false, hp: 2,
     iframes: 0, jumpTimer: ~~(Math.random() * 80)
   });
+}
+
+function spawnBoss() {
+  state.boss = {
+    x: W / 2 - 35, y: 80,
+    w: 70, h: 85,
+    vx: 0, vy: 0,
+    hp: 15, maxHp: 15,
+    onGround: false, iframes: 0,
+    jumpTimer: 100, attackTimer: 160
+  };
+  burst(W / 2, 200, '#ff2200', 30);
+  burst(W / 2, 200, '#ffdd00', 20);
 }
 
 // ─── COLLISION ──────────────────────────────────────────────────────────
@@ -218,6 +232,62 @@ function update() {
     }
   }
 
+  // Boss
+  if (state.boss) {
+    const boss = state.boss;
+    if (boss.iframes > 0) boss.iframes--;
+    const phase2 = boss.hp <= 7;
+    const bossSpeed = phase2 ? 3.2 : 2.2;
+
+    const bdx = (player.x + 16) - (boss.x + 35);
+    if (Math.abs(bdx) > 10) boss.vx += Math.sign(bdx) * 0.16;
+    boss.vx = Math.max(-bossSpeed, Math.min(bossSpeed, boss.vx));
+
+    boss.jumpTimer--;
+    if (boss.jumpTimer <= 0) {
+      if (boss.onGround) boss.vy = JUMP * 0.9;
+      boss.jumpTimer = (phase2 ? 50 : 80) + ~~(Math.random() * 60);
+    }
+
+    boss.attackTimer--;
+    if (boss.attackTimer <= 0) {
+      const angle = Math.atan2((player.y + 20) - (boss.y + 42), (player.x + 16) - (boss.x + 35));
+      const spd = phase2 ? 5.5 : 3.8;
+      bossBullets.push({ x: boss.x + 35, y: boss.y + 42, vx: Math.cos(angle) * spd, vy: Math.sin(angle) * spd, w: 14, h: 14, life: 140 });
+      boss.attackTimer = phase2 ? 75 : 130;
+      burst(boss.x + 35, boss.y + 42, '#ff4400', 6);
+    }
+
+    boss.vy += GRAVITY;
+    boss.x  += boss.vx;
+    boss.y  += boss.vy;
+    if (boss.x < 0) boss.x = 0;
+    if (boss.x + boss.w > W) boss.x = W - boss.w;
+    resolveVsPlats(boss);
+
+    if (player.iframes <= 0 && aabb(player, boss)) {
+      player.hp -= 2;
+      player.iframes = 90;
+      player.vy = -9;
+      burst(player.x + 16, player.y + 20, '#ff4444', 12);
+      if (player.hp <= 0) { state.over = true; return; }
+    }
+  }
+
+  // Boss bullets
+  for (let i = bossBullets.length - 1; i >= 0; i--) {
+    const b = bossBullets[i];
+    b.x += b.vx; b.y += b.vy; b.life--;
+    if (b.x < -30 || b.x > W + 30 || b.y > H + 30 || b.life <= 0) { bossBullets.splice(i, 1); continue; }
+    if (player.iframes <= 0 && aabb(player, b)) {
+      player.hp--;
+      player.iframes = 60;
+      burst(b.x, b.y, '#ff4400', 8);
+      bossBullets.splice(i, 1);
+      if (player.hp <= 0) { state.over = true; return; }
+    }
+  }
+
   // Bullets
   for (let i = bullets.length - 1; i >= 0; i--) {
     const b = bullets[i];
@@ -241,13 +311,33 @@ function update() {
           enemies.splice(j, 1);
           state.score += 10;
           state.killed++;
-          if (state.killed >= MAX_TOTAL_ENEMIES) { state.over = true; state.won = true; return; }
+          if (state.killed >= MAX_TOTAL_ENEMIES && !state.boss) spawnBoss();
         }
         hit = true;
         break;
       }
     }
     if (hit) { bullets.splice(i, 1); continue; }
+
+    // Hit boss
+    if (!hit && state.boss && state.boss.iframes <= 0) {
+      const boss = state.boss;
+      if (aabb(b, boss)) {
+        boss.hp--;
+        boss.iframes = 10;
+        burst(b.x, b.y, '#ff8800', 8);
+        if (boss.hp <= 0) {
+          burst(boss.x + 35, boss.y + 42, '#ffdd00', 35);
+          burst(boss.x + 35, boss.y + 42, '#ff2200', 25);
+          burst(boss.x + 35, boss.y + 42, '#ffffff', 20);
+          state.boss = null;
+          state.score += 150;
+          state.over = true;
+          state.won = true;
+        }
+        bullets.splice(i, 1); continue;
+      }
+    }
 
     // Hit platform
     for (const p of platforms) {
@@ -451,6 +541,110 @@ function drawEnemy(e) {
   ctx.restore();
 }
 
+function drawBoss(boss) {
+  const x = ~~boss.x, y = ~~boss.y;
+  const flash = boss.iframes > 0 && (frameNum % 4 < 2);
+  const phase2 = boss.hp <= 7;
+
+  ctx.save();
+  if (flash) ctx.globalAlpha = 0.25;
+  if (phase2) { ctx.shadowColor = '#ff2200'; ctx.shadowBlur = 22; }
+
+  // Füße
+  ctx.fillStyle = '#5a0a0a';
+  ctx.fillRect(x + 5,  y + 68, 20, 14);
+  ctx.fillRect(x + 45, y + 68, 20, 14);
+  // Zehennägel
+  ctx.fillStyle = '#ddddcc';
+  for (let ci = 0; ci < 3; ci++) {
+    ctx.fillRect(x + 6  + ci * 6, y + 80, 4, 5);
+    ctx.fillRect(x + 46 + ci * 6, y + 80, 4, 5);
+  }
+
+  // Körper
+  ctx.fillStyle = phase2 ? '#8a1010' : '#7a1a1a';
+  ctx.fillRect(x + 6, y + 32, 58, 40);
+  ctx.fillStyle = '#9a2525';
+  ctx.fillRect(x + 20, y + 38, 30, 28);
+
+  // Arme
+  ctx.fillStyle = '#6a1414';
+  ctx.fillRect(x - 4,  y + 28, 14, 34);
+  ctx.fillRect(x + 60, y + 28, 14, 34);
+  // Klauen
+  ctx.fillStyle = '#ddddcc';
+  for (let ci = 0; ci < 3; ci++) {
+    ctx.fillRect(x - 3  + ci * 4, y + 60, 3, 7);
+    ctx.fillRect(x + 61 + ci * 4, y + 60, 3, 7);
+  }
+
+  // Kopf
+  ctx.fillStyle = phase2 ? '#921818' : '#8a1a1a';
+  ctx.beginPath();
+  ctx.arc(x + 35, y + 22, 24, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Hörner
+  ctx.fillStyle = '#2a0505';
+  ctx.beginPath(); ctx.moveTo(x + 17, y + 6);  ctx.lineTo(x + 8,  y - 22); ctx.lineTo(x + 27, y + 3);  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + 53, y + 6);  ctx.lineTo(x + 62, y - 22); ctx.lineTo(x + 43, y + 3);  ctx.closePath(); ctx.fill();
+  // Hornspitzen
+  ctx.fillStyle = '#550000';
+  ctx.beginPath(); ctx.moveTo(x + 12, y - 8);  ctx.lineTo(x + 8,  y - 22); ctx.lineTo(x + 19, y - 6);  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x + 58, y - 8);  ctx.lineTo(x + 62, y - 22); ctx.lineTo(x + 51, y - 6);  ctx.closePath(); ctx.fill();
+
+  // 4 Augen
+  ctx.fillStyle = '#ff0000';
+  ctx.fillRect(x + 11, y + 12, 9, 9);
+  ctx.fillRect(x + 50, y + 12, 9, 9);
+  ctx.fillRect(x + 23, y + 17, 7, 7);
+  ctx.fillRect(x + 40, y + 17, 7, 7);
+  ctx.fillStyle = '#ff8800';
+  ctx.fillRect(x + 13, y + 14, 4, 4);
+  ctx.fillRect(x + 52, y + 14, 4, 4);
+  ctx.fillRect(x + 25, y + 19, 3, 3);
+  ctx.fillRect(x + 42, y + 19, 3, 3);
+
+  // Mund mit Zähnen
+  ctx.fillStyle = '#2a0000';
+  ctx.fillRect(x + 14, y + 28, 42, 8);
+  ctx.fillStyle = '#eeeecc';
+  for (let ti = 0; ti < 5; ti++) {
+    ctx.fillRect(x + 16 + ti * 8, y + 28, 5, 7);
+  }
+
+  // HP-Balken über dem Boss
+  const bw = 90, bx2 = x - 10, by2 = y - 22;
+  ctx.globalAlpha = flash ? 0.25 : 1;
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(bx2 - 2, by2 - 2, bw + 4, 16);
+  ctx.fillStyle = '#440000';
+  ctx.fillRect(bx2, by2, bw, 12);
+  ctx.fillStyle = boss.hp > 7 ? '#ff2200' : '#ff8800';
+  ctx.fillRect(bx2, by2, ~~(bw * boss.hp / boss.maxHp), 12);
+  ctx.strokeStyle = '#ff4400';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(bx2, by2, bw, 12);
+
+  ctx.restore();
+}
+
+function drawBossBullet(b) {
+  ctx.save();
+  ctx.shadowColor = '#ff4400';
+  ctx.shadowBlur = 14;
+  ctx.fillStyle = '#ff5500';
+  ctx.beginPath();
+  ctx.arc(b.x + 7, b.y + 7, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#ffcc00';
+  ctx.beginPath();
+  ctx.arc(b.x + 5, b.y + 5, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 function drawBullet(b) {
   ctx.save();
   ctx.shadowColor = '#ffcc00';
@@ -494,6 +688,33 @@ function drawHUD() {
   ctx.fillStyle = '#ffaaaa';
   ctx.font = '12px monospace';
   ctx.fillText('GETÖTET: ' + state.killed + ' / ' + MAX_TOTAL_ENEMIES, W - 162, 27);
+
+  // Endboss HP-Balken oben Mitte
+  if (state.boss) {
+    const boss = state.boss;
+    const barW = 260;
+    const bx = W / 2 - barW / 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(bx - 2, 6, barW + 4, 42);
+    ctx.strokeStyle = '#ff2200';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx - 2, 6, barW + 4, 42);
+    ctx.fillStyle = '#ff6666';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(boss.hp <= 7 ? '★ ENDBOSS  PHASE 2 ★' : '★  ENDBOSS  ★', W / 2, 22);
+    ctx.fillStyle = '#440000';
+    ctx.fillRect(bx, 26, barW, 14);
+    ctx.fillStyle = boss.hp <= 7 ? '#ff8800' : '#ff2200';
+    ctx.fillRect(bx, 26, ~~(barW * boss.hp / boss.maxHp), 14);
+    ctx.strokeStyle = '#ff4400';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(bx, 26, barW, 14);
+    ctx.fillStyle = '#ffcccc';
+    ctx.font = '10px monospace';
+    ctx.fillText(boss.hp + ' / ' + boss.maxHp, W / 2, 37);
+    ctx.textAlign = 'left';
+  }
 }
 
 function drawGameOver() {
@@ -504,11 +725,14 @@ function drawGameOver() {
 
   if (state.won) {
     ctx.fillStyle = '#ffdd00';
-    ctx.font = 'bold 56px monospace';
-    ctx.fillText('GEWONNEN!', W / 2, H / 2 - 50);
+    ctx.font = 'bold 52px monospace';
+    ctx.fillText('GEWONNEN!', W / 2, H / 2 - 60);
+    ctx.fillStyle = '#ff8800';
+    ctx.font = 'bold 26px monospace';
+    ctx.fillText('ENDBOSS BESIEGT!', W / 2, H / 2 - 20);
     ctx.fillStyle = '#aaffaa';
-    ctx.font = 'bold 22px monospace';
-    ctx.fillText('Alle 30 Monster besiegt!', W / 2, H / 2 + 4);
+    ctx.font = 'bold 18px monospace';
+    ctx.fillText('30 Monster + Endboss vernichtet!', W / 2, H / 2 + 14);
   } else {
     ctx.fillStyle = '#ff2222';
     ctx.font = 'bold 56px monospace';
@@ -592,6 +816,12 @@ function draw() {
 
   // Enemies
   for (const e of enemies) drawEnemy(e);
+
+  // Boss bullets
+  for (const b of bossBullets) drawBossBullet(b);
+
+  // Boss
+  if (state.boss) drawBoss(state.boss);
 
   // Player
   drawPlayer(player);
