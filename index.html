@@ -29,7 +29,7 @@
 </head>
 <body>
 <canvas id="c" width="900" height="520"></canvas>
-<div id="info">← → Bewegen &nbsp;|&nbsp; ↑ Springen &nbsp;|&nbsp; LEERTASTE Schießen &nbsp;|&nbsp; R Neustart</div>
+<div id="info">← → / A D Bewegen &nbsp;|&nbsp; ↑ / W Springen &nbsp;|&nbsp; LEERTASTE Schießen &nbsp;|&nbsp; R Neustart</div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -37,7 +37,7 @@ const W = canvas.width, H = canvas.height;
 
 // ─── INPUT ─────────────────────────────────────────────────────────────
 const keys = {};
-const GAME_KEYS = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyR']);
+const GAME_KEYS = new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Space','KeyR','KeyA','KeyD','KeyW']);
 document.addEventListener('keydown', e => {
   if (GAME_KEYS.has(e.code)) e.preventDefault();
   keys[e.code] = true;
@@ -139,17 +139,17 @@ function update() {
   frameNum++;
 
   // Player horizontal
-  if (keys['ArrowLeft'])  { player.vx = -SPEED; player.facing = -1; }
-  else if (keys['ArrowRight']) { player.vx =  SPEED; player.facing =  1; }
+  if (keys['ArrowLeft']  || keys['KeyA']) { player.vx = -SPEED; player.facing = -1; }
+  else if (keys['ArrowRight'] || keys['KeyD']) { player.vx =  SPEED; player.facing =  1; }
   else player.vx *= 0.75;
 
   // Jump (only on fresh press)
-  if (keys['ArrowUp']) {
+  if (keys['ArrowUp'] || keys['KeyW']) {
     if (!player.jumpPressed && player.onGround) {
       player.vy = JUMP;
       player.jumpPressed = true;
     }
-  } else {
+  } else if (!keys['ArrowUp'] && !keys['KeyW']) {
     player.jumpPressed = false;
   }
 
