@@ -51,6 +51,7 @@ const JUMP      = -12;
 const SPEED     = 4.5;
 const BULLET_V  = 11;
 const MAX_ENEMIES = 7;
+const MAX_TOTAL_ENEMIES = 30;
 
 // ─── STATE ──────────────────────────────────────────────────────────────
 let state, player, bullets, enemies, particles, spawnTimer, frameNum;
@@ -78,10 +79,10 @@ const treeDefs = [
 
 // ─── INIT ───────────────────────────────────────────────────────────────
 function restart() {
-  state    = { over: false, score: 0 };
+  state    = { over: false, won: false, score: 0, killed: 0, totalSpawned: 0 };
   player   = { x: 80, y: 400, w: 32, h: 42, vx: 0, vy: 0,
-               onGround: false, facing: 1, cooldown: 0, hp: 4,
-               iframes: 0, jumpPressed: false };
+               onGround: false, facing: 1, cooldown: 0, hp: 10,
+               iframes: 0, jumpPressed: false, jumpsLeft: 2, maxHp: 10 };
   bullets  = [];
   enemies  = [];
   particles= [];
@@ -91,6 +92,8 @@ function restart() {
 }
 
 function spawnEnemy() {
+  if (state.totalSpawned >= MAX_TOTAL_ENEMIES) return;
+  state.totalSpawned++;
   const side = Math.random() < 0.5 ? -1 : 1;
   enemies.push({
     x: side === 1 ? W + 10 : -40,
@@ -143,13 +146,15 @@ function update() {
   else if (keys['ArrowRight'] || keys['KeyD']) { player.vx =  SPEED; player.facing =  1; }
   else player.vx *= 0.75;
 
-  // Jump (only on fresh press)
+  // Jump (Doppelsprung)
+  if (player.onGround) player.jumpsLeft = 2;
   if (keys['ArrowUp'] || keys['KeyW']) {
-    if (!player.jumpPressed && player.onGround) {
+    if (!player.jumpPressed && player.jumpsLeft > 0) {
       player.vy = JUMP;
+      player.jumpsLeft--;
       player.jumpPressed = true;
     }
-  } else if (!keys['ArrowUp'] && !keys['KeyW']) {
+  } else {
     player.jumpPressed = false;
   }
 
@@ -175,7 +180,7 @@ function update() {
 
   // Enemies
   spawnTimer--;
-  if (spawnTimer <= 0 && enemies.length < MAX_ENEMIES) {
+  if (spawnTimer <= 0 && enemies.length < MAX_ENEMIES && state.totalSpawned < MAX_TOTAL_ENEMIES) {
     spawnEnemy();
     spawnTimer = 200 + ~~(Math.random() * 150);
   }
@@ -235,6 +240,8 @@ function update() {
           burst(e.x + 15, e.y + 15, '#5aff50', 14);
           enemies.splice(j, 1);
           state.score += 10;
+          state.killed++;
+          if (state.killed >= MAX_TOTAL_ENEMIES) { state.over = true; state.won = true; return; }
         }
         hit = true;
         break;
@@ -462,30 +469,31 @@ function drawBullet(b) {
 function drawHUD() {
   // Score box
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(8, 8, 160, 48);
+  ctx.fillRect(8, 8, 160, 66);
   ctx.strokeStyle = '#2a6a10';
   ctx.lineWidth = 1;
-  ctx.strokeRect(8, 8, 160, 48);
+  ctx.strokeRect(8, 8, 160, 66);
 
   ctx.fillStyle = '#aaffaa';
   ctx.font = 'bold 13px monospace';
   ctx.fillText('PUNKTE: ' + state.score, 16, 27);
 
-  // HP hearts
-  ctx.font = '18px monospace';
-  for (let i = 0; i < 4; i++) {
+  // HP hearts (2 Reihen à 5)
+  ctx.font = '16px monospace';
+  for (let i = 0; i < player.maxHp; i++) {
     ctx.fillStyle = i < player.hp ? '#ff3344' : '#442233';
-    ctx.fillText('♥', 16 + i * 22, 50);
+    const row = ~~(i / 5);
+    ctx.fillText('♥', 16 + (i % 5) * 20, 48 + row * 18);
   }
 
-  // Enemy counter
+  // Kill counter
   ctx.fillStyle = 'rgba(0,0,0,0.55)';
-  ctx.fillRect(W - 150, 8, 142, 30);
+  ctx.fillRect(W - 170, 8, 162, 30);
   ctx.strokeStyle = '#2a6a10';
-  ctx.strokeRect(W - 150, 8, 142, 30);
+  ctx.strokeRect(W - 170, 8, 162, 30);
   ctx.fillStyle = '#ffaaaa';
   ctx.font = '12px monospace';
-  ctx.fillText('FEINDE: ' + enemies.length, W - 142, 27);
+  ctx.fillText('GETÖTET: ' + state.killed + ' / ' + MAX_TOTAL_ENEMIES, W - 162, 27);
 }
 
 function drawGameOver() {
@@ -494,17 +502,29 @@ function drawGameOver() {
 
   ctx.textAlign = 'center';
 
-  ctx.fillStyle = '#ff2222';
-  ctx.font = 'bold 56px monospace';
-  ctx.fillText('GAME OVER', W / 2, H / 2 - 30);
+  if (state.won) {
+    ctx.fillStyle = '#ffdd00';
+    ctx.font = 'bold 56px monospace';
+    ctx.fillText('GEWONNEN!', W / 2, H / 2 - 50);
+    ctx.fillStyle = '#aaffaa';
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('Alle 30 Monster besiegt!', W / 2, H / 2 + 4);
+  } else {
+    ctx.fillStyle = '#ff2222';
+    ctx.font = 'bold 56px monospace';
+    ctx.fillText('GAME OVER', W / 2, H / 2 - 50);
+    ctx.fillStyle = '#ffaaaa';
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('Getötet: ' + state.killed + ' / ' + MAX_TOTAL_ENEMIES, W / 2, H / 2 + 4);
+  }
 
   ctx.fillStyle = '#aaffaa';
-  ctx.font = 'bold 26px monospace';
-  ctx.fillText('Punkte: ' + state.score, W / 2, H / 2 + 18);
+  ctx.font = 'bold 24px monospace';
+  ctx.fillText('Punkte: ' + state.score, W / 2, H / 2 + 36);
 
   ctx.fillStyle = '#ffffff';
   ctx.font = '18px monospace';
-  ctx.fillText('[ R ]  Neustart', W / 2, H / 2 + 58);
+  ctx.fillText('[ R ]  Neustart', W / 2, H / 2 + 70);
 
   ctx.textAlign = 'left';
 }
